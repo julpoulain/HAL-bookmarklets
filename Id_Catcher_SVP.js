@@ -20,6 +20,34 @@ javascript:(async () => {
         d.id = 'hal-idcatcher-popup';
         d.style.cssText = 'position:fixed;top:20px;right:20px;background:white;border:2px solid #444;padding:10px;z-index:99999;max-height:70%;overflow-y:auto;width:520px;font-family:sans-serif;';
         d.innerHTML = html;
+                // Barre de déplacement
+        let handle = document.createElement('div');
+        handle.textContent = '⠿ Déplacer';
+        handle.style.cssText = 'cursor:move;background:#eee;margin:-10px -10px 8px;padding:4px 10px;font-size:12px;color:#666;user-select:none;touch-action:none;';
+        d.insertBefore(handle, d.firstChild);
+
+        handle.addEventListener('pointerdown', (e) => {
+            const r = d.getBoundingClientRect();
+            const dx = e.clientX - r.left, dy = e.clientY - r.top;
+            // La popup est positionnée avec "right" : on bascule sur "left" pour pouvoir la déplacer
+            d.style.left = r.left + 'px';
+            d.style.top = r.top + 'px';
+            d.style.right = 'auto';
+            handle.setPointerCapture(e.pointerId);
+
+            const move = (ev) => {
+                const x = Math.min(Math.max(0, ev.clientX - dx), window.innerWidth - 60);
+                const y = Math.min(Math.max(0, ev.clientY - dy), window.innerHeight - 40);
+                d.style.left = x + 'px';
+                d.style.top = y + 'px';
+            };
+            const up = () => {
+                handle.removeEventListener('pointermove', move);
+                handle.removeEventListener('pointerup', up);
+            };
+            handle.addEventListener('pointermove', move);
+            handle.addEventListener('pointerup', up);
+        });
         let b = document.createElement('button');
         b.textContent = 'Fermer';
         b.style.marginTop = '10px';
@@ -110,7 +138,7 @@ javascript:(async () => {
         // Construction des requêtes IdRef, ORCID et (SoVisu+ uniquement) idHAL
         let qUrl = `https://www.idref.fr/Sru/Solr?q=${encodeURIComponent(`persname_t:(${nom} AND ${prenom})`)}&fl=id,ppn_z,affcourt_z,recordtype_z&rows=20&wt=json`;
         let orcidUrl = `https://pub.orcid.org/v3.0/search/?q=family-name:${encodeURIComponent(stripAccents(nom))}+AND+given-names:${encodeURIComponent(stripAccents(prenom))}&rows=8`;
-        let halAuthUrl = `https://api.archives-ouvertes.fr/ref/author/?q=${encodeURIComponent(`fullName_t:"${prenom} ${nom}"`)}&fl=fullName_s,idHal_s,person_i,valid_s&rows=20&wt=json`;
+        let halAuthUrl = `https://api.archives-ouvertes.fr/ref/author/?q=${encodeURIComponent(`fullName_t:"${prenom} ${nom}"`)}&fl=fullName_s,idHal_s,person_i,valid_s,emailDomain_s,orcidId_s,idrefId_s&rows=20&wt=json`;
 
         // Requêtes parallèles IdRef + ORCID (+ idHAL sur SoVisu+)
         let [r2, r3, r4] = await Promise.allSettled([
@@ -217,9 +245,9 @@ javascript:(async () => {
             html += `<div style="margin-top:15px;"><h3 style="background:#f5eada;padding:6px;margin:0;">🔓 HAL</h3><ul style="padding-left:14px;margin-top:8px;">`;
             const st = v => String(v || '').toUpperCase();
             const badgeInfo = {
-                PREFERRED: { txt: 'PREF',  bg: '#2E7D32', fg: 'white' },
+                PREFERRED: { txt: 'VALIDÉE',  bg: '#2E7D32', fg: 'white' },
                 VALID:     { txt: 'VALID', bg: '#2E7D32', fg: 'white' },
-                OLD:       { txt: 'OLD',   bg: '#F9A825', fg: '#333' }
+                OLD:       { txt: 'FORME',   bg: '#F9A825', fg: '#333' }
             };
             const statusRank = { PREFERRED: 0, VALID: 1, OLD: 2 };
             const copyBtn = v => `<button data-copy="${escapeAttr(v)}" style="border:none;background:#f5eada;color:white;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">📋</button>`;
@@ -243,6 +271,22 @@ javascript:(async () => {
                     }
                     if (idAut) {
                         lines += `<div style="margin-top:4px;"><b>IDAUTEUR :</b> <a href="https://aurehal.archives-ouvertes.fr/person/read/id/${escapeAttr(idAut)}" target="_blank" rel="noopener">${escapeHtml(idAut)}</a> ${copyBtn(idAut)}</div>`;
+                    }
+                                        // Champs complémentaires de la forme-auteur (tableaux dans l'API)
+                    const arr = v => Array.isArray(v) ? v : (v ? [v] : []);
+                    const bare = (v, re) => String(v).replace(re, '').replace(/\/$/, '');
+
+                    for (const u of arr(d.idrefId_s)) {
+                        const id = bare(u, /^https?:\/\/(www\.)?idref\.fr\//i);
+                        lines += `<div style="margin-top:4px;"><b>IDREF :</b> <a href="https://www.idref.fr/${escapeAttr(id)}" target="_blank" rel="noopener">${escapeHtml(id)}</a> ${copyBtn(id)}</div>`;
+                    }
+                    for (const u of arr(d.orcidId_s)) {
+                        const id = bare(u, /^https?:\/\/(www\.)?orcid\.org\//i);
+                        lines += `<div style="margin-top:4px;"><b>ORCID :</b> <a href="https://orcid.org/${escapeAttr(id)}" target="_blank" rel="noopener">${escapeHtml(id)}</a> ${copyBtn(id)}</div>`;
+                    }
+                    const domains = arr(d.emailDomain_s);
+                    if (domains.length) {
+                        lines += `<div style="margin-top:4px;font-size:12px;color:#555;">✉️ ${domains.map(x => '@' + escapeHtml(x)).join(', ')}</div>`;
                     }
                     if (!lines) {
                         lines = `<div style="margin-top:4px;font-size:12px;color:#777;">Pas d'idHAL ni d'idAuteur</div>`;
